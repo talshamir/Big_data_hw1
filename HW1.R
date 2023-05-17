@@ -60,7 +60,7 @@ a
 
 # Create the box plot using ggplot
 b<-ggplot(listings, aes(x=" ",y=beds)) +
-  geom_boxplot(fill="#00BFFF",coef=1.5, alpha=0.7, size=1.1) + stat_boxplot(geom = 'errorbar')+
+  geom_boxplot(fill="#00BFFF",coef=1.5, alpha=0.7, size=1.1) + stat_boxplot(geom = 'errorbar', width = 0.2)+
   scale_y_continuous(breaks = seq(0, 16, 1),labels = seq(0,16,1))+
   # Add the custom theme
   theme_economist() +
@@ -165,3 +165,149 @@ b<-ggplot(listings, aes(x=" ",y=review_scores_rating)) +
   ylab("score")
   listings$review_scores_rating %>%
 plot(b)
+  
+  
+  
+  #-----------------------1.B---------------------------#
+  
+  ####-------------Average reviews per month vs summary_length---------###
+  listings$summary_len <- nchar(listings$summary)
+  # Replace NA with 0 in the reviews_per_month column
+  listings$reviews_per_month <- ifelse(is.na(listings$reviews_per_month), 0, listings$reviews_per_month)
+  listings$neighbourhood[is.na(listings$neighbourhood) | listings$neighbourhood == ""] <- "Unknown"
+  listings <- listings[!is.na(listings$beds), ]
+  View(listings)
+  listings_summary <- listings %>%
+    group_by(summary_len) %>%
+    summarize(avg_reviews_per_month = mean(reviews_per_month))
+  
+  ggplot(listings_summary, aes(x = summary_len, y = avg_reviews_per_month)) +
+    geom_point() +
+    geom_smooth(method = "lm",se=FALSE)+
+    labs(title = "Average Reviews per Month per Summary Length",
+         x = "Summary Length",
+         y = "Average Reviews per Month")
+correlation <- by(listings[, c("price_dollars", "beds")], listings$neighbourhood, cor)
+
+listings_filtered <- listings %>%
+  group_by(neighbourhood) %>%
+  filter(n() >= 200,price_dollars < 3000)
+
+ggplot(listings_filtered, aes(x = beds, y = price_dollars, color = neighbourhood)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Scatter plot of Price vs Beds by Neighbourhood",
+       x = "Beds",
+       y = "Price",
+       color = "Neighbourhood") +
+  theme(legend.position = "right")
+  
+ggplot(listings_filtered, aes(x = beds, y = price_dollars)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Scatter plot of Price vs Beds",
+       subtitle = "This plot shows prices per neighbourhood that has at least 200 listings",
+       x = "Beds",
+       y = "Price",
+       color = "Neighbourhood") +
+  facet_wrap(~ neighbourhood, nrow = 3, ncol = 3) +
+  theme(legend.position = "right")
+###------------------location per neighborhood we filtered N.as and neighbers with less then 30 reviews"
+listings_filtered <- listings %>%
+  drop_na(review_scores_location) %>%
+  group_by(neighbourhood) %>%
+  filter(n() >= 30)
+
+
+mean_review <- listings_filtered %>%
+  group_by(neighbourhood) %>%
+  summarize(mean_review_score = mean(review_scores_location))
+
+ggplot(mean_review, aes(x = reorder(neighbourhood, mean_review_score), y = mean_review_score)) +
+  geom_bar(stat = "identity", fill = "lightblue", color = "black") +
+  labs(title = "Mean Review Score by Neighbourhood",
+       x = "Neighbourhood",
+       y = "Mean Review Score") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_cartesian(ylim = c(8.25, 10))  
+
+
+#------------------Q2---------METRICS------------------#
+
+
+#----------------preperations----------#
+library(tidyverse)
+library(lubridate)
+calendar = read.csv("calendar_clean.csv", header=T)
+# Replace NA with 0 in the price_dollars column
+calendar <- calendar %>%
+  mutate(price_dollars = ifelse(is.na(price_dollars), 0, as.numeric(gsub("\\$|,", "", price_dollars))))
+
+calendar$date <- as.Date(calendar$date)
+
+# Summarize price per week
+weekly_sum <- calendar %>%
+  mutate(week = format(date, "%Y-%W")) %>%
+  group_by(week) %>%
+  summarise(total_price = sum(price_dollars, na.rm = TRUE)) %>%
+  mutate(total_price = total_price/1000)
+
+# convert week to date
+weekly_sum$date <- as.Date(paste(weekly_sum$week, "1", sep = "-"), format = "%Y-%U-%u")
+
+# order data by date
+weekly_sum <- weekly_sum[order(weekly_sum$date), ]
+
+ggplot(weekly_sum, aes(x = week, y = total_price)) +
+  geom_line(aes(group = 1)) +
+  labs(x = "Week", y = "Sum per week(Thousands)") +
+  theme_economist()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+
+#New Hosts by quarter and neighborhood
+
+library(forcats)
+
+listings %>%
+  mutate(host_since_quarter = paste0("Q", quarter(host_since), "-", year(host_since)),
+         neighbourhood = factor(neighbourhood)) %>%
+  group_by(host_since_quarter, neighbourhood) %>%
+  summarize(count = n()) %>%
+  ggplot(aes(x = fct_reorder(host_since_quarter, as.Date(paste0("01-", gsub("Q", "", host_since_quarter), "-01"), format = "%d-%m-%Y")), y = count, fill = neighbourhood)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5)) +
+  scale_fill_discrete(name = "Neighbourhood") +
+  xlab("Quarter") +
+  ylab("Number of new hosts") +
+  ggtitle("New Hosts by quarter and neighbourhood")
+
+# metrics number #3 mean price for night per neighberhood across time##
+
+library(dplyr)
+merged_df <- merge(listings, calendar, by.x = "id", by.y = "listing_id")
+merged_df <- merged_df[complete.cases(merged_df$price_dollars.y), ]
+merged_df <- merged_df %>% group_by(neighbourhood) %>% filter(n() >= 2000)
+merged_df <- merged_df %>%
+  mutate(price_dollars.y = (as.numeric(gsub("\\$|,", "", price_dollars.y))))
+
+#test1#
+
+new_df <- merged_df %>%
+  filter(!is.na(price_dollars.y)) %>%
+  mutate(month = floor_date(as.Date(date), "month")) %>%
+  group_by(neighbourhood, month) %>%
+  summarise(avg_price = mean(price_dollars.y)) %>%
+  select(avg_price, month, neighbourhood)
+
+
+ggplot(new_df, aes(x = month, y = avg_price, group = neighbourhood, color = neighbourhood)) +
+  geom_line() +
+  labs(x = "Month", y = "Average Price", color = "Neighborhood") +
+  ggtitle("Average Price by Neighborhood over Time") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+
